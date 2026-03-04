@@ -1,0 +1,9 @@
+apiVersion: burst.homelab.dev/v1alpha1
+kind: BurstNodePool
+metadata:
+  labels:
+    app.kubernetes.io/name: cloud-burst-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: burstnodepool-sample
+spec:
+  # TODO(user): Add fields here

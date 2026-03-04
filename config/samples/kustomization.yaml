@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- burst_v1alpha1_burstnodepool.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
