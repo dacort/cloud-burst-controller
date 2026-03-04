@@ -20,67 +20,194 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// BurstNodePoolSpec defines the desired state of BurstNodePool
+// BurstNodePoolSpec defines the desired state of BurstNodePool.
 type BurstNodePoolSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// Cloud provider discriminator. Only "aws" is supported in v1.
+	// +kubebuilder:validation:Enum=aws
+	Cloud string `json:"cloud"`
 
-	// foo is an example field of BurstNodePool. Edit burstnodepool_types.go to remove/update
+	// AWS-specific configuration. Required when cloud is "aws".
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	AWS *AWSConfig `json:"aws,omitempty"`
+
+	// Talos machine config reference.
+	Talos TalosConfig `json:"talos"`
+
+	// Scaling parameters.
+	Scaling ScalingConfig `json:"scaling"`
+
+	// Rules for matching unschedulable pods to this pool.
+	MatchRules MatchRules `json:"matchRules"`
+
+	// Labels applied to burst nodes when they register.
+	// +optional
+	NodeLabels map[string]string `json:"nodeLabels,omitempty"`
+
+	// Taints applied to burst nodes when they register.
+	// +optional
+	NodeTaints []NodeTaint `json:"nodeTaints,omitempty"`
+}
+
+type AWSConfig struct {
+	// AWS region for EC2 instances.
+	Region string `json:"region"`
+
+	// AMI ID for Talos instances.
+	AMI string `json:"ami"`
+
+	// EC2 instance type.
+	InstanceType string `json:"instanceType"`
+
+	// Subnet ID for instance placement.
+	SubnetID string `json:"subnetId"`
+
+	// Security group IDs.
+	SecurityGroupIDs []string `json:"securityGroupIds"`
+
+	// Root volume size in GB.
+	// +kubebuilder:default=30
+	VolumeSize int32 `json:"volumeSize,omitempty"`
+
+	// Root volume type.
+	// +kubebuilder:default=gp3
+	VolumeType string `json:"volumeType,omitempty"`
+
+	// Additional EC2 tags.
+	// +optional
+	Tags map[string]string `json:"tags,omitempty"`
+}
+
+type TalosConfig struct {
+	// Name of the Secret containing the Talos machine config.
+	MachineConfigSecret string `json:"machineConfigSecret"`
+
+	// Key within the Secret.
+	// +kubebuilder:default=worker.yaml
+	MachineConfigKey string `json:"machineConfigKey,omitempty"`
+}
+
+type ScalingConfig struct {
+	// Maximum number of nodes this pool can provision.
+	// +kubebuilder:validation:Minimum=0
+	MaxNodes int32 `json:"maxNodes"`
+
+	// How long a node must be idle before termination.
+	// +kubebuilder:default="5m"
+	CooldownPeriod metav1.Duration `json:"cooldownPeriod,omitempty"`
+
+	// Max time to wait for a node to become Ready.
+	// +kubebuilder:default="5m"
+	BootTimeout metav1.Duration `json:"bootTimeout,omitempty"`
+}
+
+type MatchRules struct {
+	// Tolerations the pod must have.
+	// +optional
+	Tolerations []TolerationRule `json:"tolerations,omitempty"`
+
+	// Node affinity labels the pod must request.
+	// +optional
+	NodeAffinityLabels map[string]string `json:"nodeAffinityLabels,omitempty"`
+
+	// Resource requests the pod must have.
+	// +optional
+	Resources []ResourceRule `json:"resources,omitempty"`
+}
+
+type TolerationRule struct {
+	Key      string `json:"key"`
+	Operator string `json:"operator"`
+	// +optional
+	Value string `json:"value,omitempty"`
+}
+
+type ResourceRule struct {
+	ResourceName string `json:"resourceName"`
+	Operator     string `json:"operator"`
+}
+
+type NodeTaint struct {
+	Key    string `json:"key"`
+	Value  string `json:"value,omitempty"`
+	Effect string `json:"effect"`
 }
 
 // BurstNodePoolStatus defines the observed state of BurstNodePool.
 type BurstNodePoolStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Number of nodes in Running state.
+	ActiveNodes int32 `json:"activeNodes"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// Number of nodes in Pending state.
+	PendingNodes int32 `json:"pendingNodes"`
 
-	// conditions represent the current state of the BurstNodePool resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// Individual node statuses.
+	// +optional
+	Nodes []BurstNodeStatus `json:"nodes,omitempty"`
+
+	// Standard conditions.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// +kubebuilder:validation:Enum=Pending;Running;Cordoned;Draining;Terminating
+type NodeState string
+
+const (
+	NodeStatePending     NodeState = "Pending"
+	NodeStateRunning     NodeState = "Running"
+	NodeStateCordoned    NodeState = "Cordoned"
+	NodeStateDraining    NodeState = "Draining"
+	NodeStateTerminating NodeState = "Terminating"
+)
+
+type BurstNodeStatus struct {
+	// Kubernetes node name.
+	Name string `json:"name"`
+
+	// Cloud provider instance ID.
+	InstanceID string `json:"instanceId"`
+
+	// Current lifecycle state.
+	State NodeState `json:"state"`
+
+	// When the instance was launched.
+	LaunchedAt metav1.Time `json:"launchedAt"`
+
+	// When the node became Ready.
+	// +optional
+	ReadyAt *metav1.Time `json:"readyAt,omitempty"`
+
+	// When the last non-daemonset pod finished on this node.
+	// +optional
+	LastPodFinished *metav1.Time `json:"lastPodFinished,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Cloud",type=string,JSONPath=`.spec.cloud`
+// +kubebuilder:printcolumn:name="Max",type=integer,JSONPath=`.spec.scaling.maxNodes`
+// +kubebuilder:printcolumn:name="Active",type=integer,JSONPath=`.status.activeNodes`
+// +kubebuilder:printcolumn:name="Pending",type=integer,JSONPath=`.status.pendingNodes`
 
-// BurstNodePool is the Schema for the burstnodepools API
+// BurstNodePool is the Schema for the burstnodepools API.
 type BurstNodePool struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec defines the desired state of BurstNodePool
 	// +required
 	Spec BurstNodePoolSpec `json:"spec"`
 
-	// status defines the observed state of BurstNodePool
 	// +optional
 	Status BurstNodePoolStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// BurstNodePoolList contains a list of BurstNodePool
+// BurstNodePoolList contains a list of BurstNodePool.
 type BurstNodePoolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`

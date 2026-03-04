@@ -14,10 +14,23 @@ spec:
     singular: burstnodepool
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.cloud
+      name: Cloud
+      type: string
+    - jsonPath: .spec.scaling.maxNodes
+      name: Max
+      type: integer
+    - jsonPath: .status.activeNodes
+      name: Active
+      type: integer
+    - jsonPath: .status.pendingNodes
+      name: Pending
+      type: integer
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: BurstNodePool is the Schema for the burstnodepools API
+        description: BurstNodePool is the Schema for the burstnodepools API.
         properties:
           apiVersion:
             description: |-
@@ -37,27 +50,159 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of BurstNodePool
+            description: BurstNodePoolSpec defines the desired state of BurstNodePool.
             properties:
-              foo:
-                description: foo is an example field of BurstNodePool. Edit burstnodepool_types.go
-                  to remove/update
+              aws:
+                description: AWS-specific configuration. Required when cloud is "aws".
+                properties:
+                  ami:
+                    description: AMI ID for Talos instances.
+                    type: string
+                  instanceType:
+                    description: EC2 instance type.
+                    type: string
+                  region:
+                    description: AWS region for EC2 instances.
+                    type: string
+                  securityGroupIds:
+                    description: Security group IDs.
+                    items:
+                      type: string
+                    type: array
+                  subnetId:
+                    description: Subnet ID for instance placement.
+                    type: string
+                  tags:
+                    additionalProperties:
+                      type: string
+                    description: Additional EC2 tags.
+                    type: object
+                  volumeSize:
+                    default: 30
+                    description: Root volume size in GB.
+                    format: int32
+                    type: integer
+                  volumeType:
+                    default: gp3
+                    description: Root volume type.
+                    type: string
+                required:
+                - ami
+                - instanceType
+                - region
+                - securityGroupIds
+                - subnetId
+                type: object
+              cloud:
+                description: Cloud provider discriminator. Only "aws" is supported
+                  in v1.
+                enum:
+                - aws
                 type: string
+              matchRules:
+                description: Rules for matching unschedulable pods to this pool.
+                properties:
+                  nodeAffinityLabels:
+                    additionalProperties:
+                      type: string
+                    description: Node affinity labels the pod must request.
+                    type: object
+                  resources:
+                    description: Resource requests the pod must have.
+                    items:
+                      properties:
+                        operator:
+                          type: string
+                        resourceName:
+                          type: string
+                      required:
+                      - operator
+                      - resourceName
+                      type: object
+                    type: array
+                  tolerations:
+                    description: Tolerations the pod must have.
+                    items:
+                      properties:
+                        key:
+                          type: string
+                        operator:
+                          type: string
+                        value:
+                          type: string
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                type: object
+              nodeLabels:
+                additionalProperties:
+                  type: string
+                description: Labels applied to burst nodes when they register.
+                type: object
+              nodeTaints:
+                description: Taints applied to burst nodes when they register.
+                items:
+                  properties:
+                    effect:
+                      type: string
+                    key:
+                      type: string
+                    value:
+                      type: string
+                  required:
+                  - effect
+                  - key
+                  type: object
+                type: array
+              scaling:
+                description: Scaling parameters.
+                properties:
+                  bootTimeout:
+                    default: 5m
+                    description: Max time to wait for a node to become Ready.
+                    type: string
+                  cooldownPeriod:
+                    default: 5m
+                    description: How long a node must be idle before termination.
+                    type: string
+                  maxNodes:
+                    description: Maximum number of nodes this pool can provision.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - maxNodes
+                type: object
+              talos:
+                description: Talos machine config reference.
+                properties:
+                  machineConfigKey:
+                    default: worker.yaml
+                    description: Key within the Secret.
+                    type: string
+                  machineConfigSecret:
+                    description: Name of the Secret containing the Talos machine config.
+                    type: string
+                required:
+                - machineConfigSecret
+                type: object
+            required:
+            - cloud
+            - matchRules
+            - scaling
+            - talos
             type: object
           status:
-            description: status defines the observed state of BurstNodePool
+            description: BurstNodePoolStatus defines the observed state of BurstNodePool.
             properties:
+              activeNodes:
+                description: Number of nodes in Running state.
+                format: int32
+                type: integer
               conditions:
-                description: |-
-                  conditions represent the current state of the BurstNodePool resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: Standard conditions.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +261,52 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              nodes:
+                description: Individual node statuses.
+                items:
+                  properties:
+                    instanceId:
+                      description: Cloud provider instance ID.
+                      type: string
+                    lastPodFinished:
+                      description: When the last non-daemonset pod finished on this
+                        node.
+                      format: date-time
+                      type: string
+                    launchedAt:
+                      description: When the instance was launched.
+                      format: date-time
+                      type: string
+                    name:
+                      description: Kubernetes node name.
+                      type: string
+                    readyAt:
+                      description: When the node became Ready.
+                      format: date-time
+                      type: string
+                    state:
+                      description: Current lifecycle state.
+                      enum:
+                      - Pending
+                      - Running
+                      - Cordoned
+                      - Draining
+                      - Terminating
+                      type: string
+                  required:
+                  - instanceId
+                  - launchedAt
+                  - name
+                  - state
+                  type: object
+                type: array
+              pendingNodes:
+                description: Number of nodes in Pending state.
+                format: int32
+                type: integer
+            required:
+            - activeNodes
+            - pendingNodes
             type: object
         required:
         - spec
