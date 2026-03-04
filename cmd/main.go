@@ -178,11 +178,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.BurstNodePoolReconciler{
+	if err := (&controller.ProvisionerReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "BurstNodePool")
+		setupLog.Error(err, "Failed to create controller", "controller", "Provisioner")
+		os.Exit(1)
+	}
+
+	if err := (&controller.NodeReadyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "NodeReady")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
