@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -99,6 +100,16 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	logger.Info("matched unschedulable pod to pool", "pod", req.NamespacedName, "pool", pool.Name)
+
+	// Skip if we already processed this pod (prevents double-provisioning from race conditions)
+	if pod.Annotations != nil && pod.Annotations["burst.homelab.dev/provisioned"] == "true" {
+		return ctrl.Result{}, nil
+	}
+
+	// Re-fetch pool to get latest status (prevents race with concurrent reconciles)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: pool.Namespace, Name: pool.Name}, pool); err != nil {
+		return ctrl.Result{}, fmt.Errorf("re-fetching pool: %w", err)
+	}
 
 	// Check capacity
 	currentNodes := pool.Status.ActiveNodes + pool.Status.PendingNodes
@@ -190,8 +201,16 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("updating pool status: %w", err)
 	}
 
-	// Requeue to check if nodes become ready
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	// Annotate pod to prevent double-provisioning on re-reconcile
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+	pod.Annotations["burst.homelab.dev/provisioned"] = "true"
+	if err := r.Update(ctx, &pod); err != nil {
+		logger.Error(err, "failed to annotate pod as provisioned", "pod", req.NamespacedName)
+	}
+
+	return ctrl.Result{}, nil
 }
 
 func (r *ProvisionerReconciler) debouncePeriod() time.Duration {
@@ -243,8 +262,11 @@ func (r *NodeReadyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Only handle burst-managed nodes
-	if node.Labels["burst.homelab.dev/managed"] != "true" {
+	// Only handle burst-managed nodes. Check label first, then fall back to
+	// name prefix since labels are applied by this reconciler after the node
+	// first becomes ready (chicken-and-egg).
+	if node.Labels["burst.homelab.dev/managed"] != "true" &&
+		!strings.HasPrefix(node.Name, "burst-") {
 		return ctrl.Result{}, nil
 	}
 
