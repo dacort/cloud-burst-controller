@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"slices"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -107,11 +108,8 @@ func termMatchesLabels(term corev1.NodeSelectorTerm, labels map[string]string) b
 		found := false
 		for _, expr := range term.MatchExpressions {
 			if expr.Key == key && expr.Operator == corev1.NodeSelectorOpIn {
-				for _, v := range expr.Values {
-					if v == value {
-						found = true
-						break
-					}
+				if slices.Contains(expr.Values, value) {
+					found = true
 				}
 			}
 			// Also match Exists operator (no value check needed)
@@ -129,7 +127,7 @@ func termMatchesLabels(term corev1.NodeSelectorTerm, labels map[string]string) b
 // IsBurstEnabled returns true if the pod has the burst.homelab.dev/enabled=true label,
 // which bypasses the debounce period.
 func IsBurstEnabled(pod *corev1.Pod) bool {
-	return pod.Labels["burst.homelab.dev/enabled"] == "true"
+	return pod.Labels["burst.homelab.dev/enabled"] == labelValueTrue
 }
 
 // IsPodUnschedulable returns true if the pod has PodScheduled=False with reason Unschedulable.

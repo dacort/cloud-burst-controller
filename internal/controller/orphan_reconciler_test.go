@@ -110,7 +110,7 @@ func TestOrphanDetection_CloudInstanceNoK8sNode_WithinBootTimeout(t *testing.T) 
 
 	for _, cn := range cloudNodes {
 		if !k8sNodeNames[cn.Name] && time.Since(cn.LaunchedAt) >= bootTimeout {
-			mock.TerminateNode(context.Background(), cn.InstanceID)
+			_ = mock.TerminateNode(context.Background(), cn.InstanceID)
 		}
 	}
 
@@ -140,7 +140,7 @@ func TestOrphanDetection_CloudInstanceWithK8sNode_NoAction(t *testing.T) {
 
 	for _, cn := range cloudNodes {
 		if !k8sNodeNames[cn.Name] && time.Since(cn.LaunchedAt) >= bootTimeout {
-			mock.TerminateNode(context.Background(), cn.InstanceID)
+			_ = mock.TerminateNode(context.Background(), cn.InstanceID)
 		}
 	}
 

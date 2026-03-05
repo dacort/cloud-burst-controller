@@ -69,7 +69,7 @@ func (r *ReaperReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Only handle burst-managed nodes
-	if node.Labels["burst.homelab.dev/managed"] != "true" {
+	if node.Labels["burst.homelab.dev/managed"] != labelValueTrue {
 		return ctrl.Result{}, nil
 	}
 
@@ -250,13 +250,13 @@ func (r *ReaperReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithEventFilter(predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				if labels := e.Object.GetLabels(); labels != nil {
-					return labels["burst.homelab.dev/managed"] == "true"
+					return labels["burst.homelab.dev/managed"] == labelValueTrue
 				}
 				return false
 			},
 			UpdateFunc: func(e event.UpdateEvent) bool {
 				if labels := e.ObjectNew.GetLabels(); labels != nil {
-					return labels["burst.homelab.dev/managed"] == "true"
+					return labels["burst.homelab.dev/managed"] == labelValueTrue
 				}
 				return false
 			},

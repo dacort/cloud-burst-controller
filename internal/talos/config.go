@@ -10,19 +10,19 @@ import (
 // PatchHostname sets machine.network.hostname in a Talos machine config YAML.
 // Uses generic map manipulation to avoid depending on Talos Go types.
 func PatchHostname(configYAML []byte, hostname string) ([]byte, error) {
-	var config map[string]interface{}
+	var config map[string]any
 	if err := yaml.Unmarshal(configYAML, &config); err != nil {
 		return nil, fmt.Errorf("unmarshaling machine config: %w", err)
 	}
 
-	machine, ok := config["machine"].(map[string]interface{})
+	machine, ok := config["machine"].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("machine config missing 'machine' key")
 	}
 
-	network, ok := machine["network"].(map[string]interface{})
+	network, ok := machine["network"].(map[string]any)
 	if !ok {
-		network = make(map[string]interface{})
+		network = make(map[string]any)
 		machine["network"] = network
 	}
 

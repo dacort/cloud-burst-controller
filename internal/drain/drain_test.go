@@ -17,7 +17,7 @@ func TestCordonNode(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "burst-node-1"},
 		Spec:       corev1.NodeSpec{Unschedulable: false},
 	}
-	client := fake.NewSimpleClientset(node)
+	client := fake.NewClientset(node)
 	drainer := NewDrainer(client, 30*time.Second)
 
 	err := drainer.CordonNode(context.Background(), "burst-node-1")
@@ -29,7 +29,7 @@ func TestCordonNode(t *testing.T) {
 }
 
 func TestCordonNode_NotFound(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	drainer := NewDrainer(client, 30*time.Second)
 
 	err := drainer.CordonNode(context.Background(), "nonexistent")
@@ -40,7 +40,7 @@ func TestDrainNode_NoPods(t *testing.T) {
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "burst-node-1"},
 	}
-	client := fake.NewSimpleClientset(node)
+	client := fake.NewClientset(node)
 	drainer := NewDrainer(client, 30*time.Second)
 
 	err := drainer.DrainNode(context.Background(), "burst-node-1")

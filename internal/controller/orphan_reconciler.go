@@ -61,7 +61,7 @@ func (r *OrphanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Get all K8s nodes with burst label
 	var nodeList corev1.NodeList
-	if err := r.List(ctx, &nodeList, client.MatchingLabels{"burst.homelab.dev/managed": "true"}); err != nil {
+	if err := r.List(ctx, &nodeList, client.MatchingLabels{"burst.homelab.dev/managed": labelValueTrue}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("listing burst K8s nodes: %w", err)
 	}
 
@@ -180,7 +180,7 @@ func (o *orphanRunner) Start(ctx context.Context) error {
 	defer ticker.Stop()
 
 	// Run immediately on start
-	o.reconciler.Reconcile(ctx, reconcile.Request{})
+	_, _ = o.reconciler.Reconcile(ctx, reconcile.Request{})
 
 	for {
 		select {

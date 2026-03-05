@@ -113,10 +113,7 @@ func estimatePodsPerNode(pods []corev1.Pod, capacity InstanceCapacity) int32 {
 		fitByMem = int32(capacity.MemoryMi / maxMem)
 	}
 
-	fit := fitByCPU
-	if fitByMem < fit {
-		fit = fitByMem
-	}
+	fit := min(fitByCPU, fitByMem)
 	if fit <= 0 {
 		fit = 1
 	}

@@ -36,10 +36,11 @@ func NewEC2Provider(ctx context.Context) (*EC2Provider, error) {
 }
 
 func (p *EC2Provider) LaunchNode(ctx context.Context, opts cloud.LaunchOptions) (string, error) {
-	tags := []ec2types.Tag{
-		{Key: aws.String("Name"), Value: aws.String(opts.Name)},
-		{Key: aws.String("burst.homelab.dev/managed"), Value: aws.String("true")},
-	}
+	tags := make([]ec2types.Tag, 0, 2+len(opts.Tags))
+	tags = append(tags,
+		ec2types.Tag{Key: aws.String("Name"), Value: aws.String(opts.Name)},
+		ec2types.Tag{Key: aws.String("burst.homelab.dev/managed"), Value: aws.String("true")},
+	)
 	for k, v := range opts.Tags {
 		tags = append(tags, ec2types.Tag{Key: aws.String(k), Value: aws.String(v)})
 	}

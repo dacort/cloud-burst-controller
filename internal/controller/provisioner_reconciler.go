@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ import (
 
 const (
 	defaultDebouncePeriod = 30 * time.Second
+	labelValueTrue        = "true"
 )
 
 // ProvisionerReconciler watches unschedulable Pods and provisions burst nodes.
@@ -102,7 +104,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	logger.Info("matched unschedulable pod to pool", "pod", req.NamespacedName, "pool", pool.Name)
 
 	// Skip if we already processed this pod (prevents double-provisioning from race conditions)
-	if pod.Annotations != nil && pod.Annotations["burst.homelab.dev/provisioned"] == "true" {
+	if pod.Annotations != nil && pod.Annotations["burst.homelab.dev/provisioned"] == labelValueTrue {
 		return ctrl.Result{}, nil
 	}
 
@@ -157,7 +159,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Launch nodes
-	for i := int32(0); i < nodesNeeded; i++ {
+	for range nodesNeeded {
 		nodeName := fmt.Sprintf("burst-%s-%s", pool.Name, randomSuffix())
 
 		userData, err := talos.PatchAndEncode(configData, nodeName)
@@ -205,7 +207,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
-	pod.Annotations["burst.homelab.dev/provisioned"] = "true"
+	pod.Annotations["burst.homelab.dev/provisioned"] = labelValueTrue
 	if err := r.Update(ctx, &pod); err != nil {
 		logger.Error(err, "failed to annotate pod as provisioned", "pod", req.NamespacedName)
 	}
@@ -265,7 +267,7 @@ func (r *NodeReadyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Only handle burst-managed nodes. Check label first, then fall back to
 	// name prefix since labels are applied by this reconciler after the node
 	// first becomes ready (chicken-and-egg).
-	if node.Labels["burst.homelab.dev/managed"] != "true" &&
+	if node.Labels["burst.homelab.dev/managed"] != labelValueTrue &&
 		!strings.HasPrefix(node.Name, "burst-") {
 		return ctrl.Result{}, nil
 	}
@@ -296,9 +298,7 @@ func (r *NodeReadyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				if node.Labels == nil {
 					node.Labels = make(map[string]string)
 				}
-				for k, v := range pool.Spec.NodeLabels {
-					node.Labels[k] = v
-				}
+				maps.Copy(node.Labels, pool.Spec.NodeLabels)
 				if err := r.Update(ctx, &node); err != nil {
 					logger.Error(err, "failed to update node labels", "node", node.Name)
 				}
