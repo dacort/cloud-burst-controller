@@ -5,11 +5,17 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - burst.homelab.dev
+  - ""
   resources:
-  - burstnodepools
+  - events
   verbs:
   - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
   - delete
   - get
   - list
@@ -17,11 +23,24 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - burst.homelab.dev
   resources:
-  - burstnodepools/finalizers
+  - burstnodepools
   verbs:
+  - get
+  - list
+  - patch
   - update
+  - watch
 - apiGroups:
   - burst.homelab.dev
   resources:

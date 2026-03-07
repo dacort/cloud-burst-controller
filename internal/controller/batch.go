@@ -34,10 +34,10 @@ type InstanceCapacity struct {
 // Known instance type capacities (allocatable, roughly 90% of total).
 var instanceCapacities = map[string]InstanceCapacity{
 	// T3 family (amd64, burstable)
-	"t3.medium":   {VCPUs: 1800, MemoryMi: 3500, Architecture: "amd64"},
-	"t3.large":    {VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"},
-	"t3.xlarge":   {VCPUs: 3600, MemoryMi: 14800, Architecture: "amd64"},
-	"t3.2xlarge":  {VCPUs: 7200, MemoryMi: 29600, Architecture: "amd64"},
+	"t3.medium":  {VCPUs: 1800, MemoryMi: 3500, Architecture: "amd64"},
+	"t3.large":   {VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"},
+	"t3.xlarge":  {VCPUs: 3600, MemoryMi: 14800, Architecture: "amd64"},
+	"t3.2xlarge": {VCPUs: 7200, MemoryMi: 29600, Architecture: "amd64"},
 
 	// M6i family (amd64, general purpose)
 	"m6i.large":   {VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"},
@@ -46,8 +46,8 @@ var instanceCapacities = map[string]InstanceCapacity{
 	"m6i.4xlarge": {VCPUs: 14400, MemoryMi: 59200, Architecture: "amd64"},
 
 	// M7i family (amd64, general purpose)
-	"m7i.large":   {VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"},
-	"m7i.xlarge":  {VCPUs: 3600, MemoryMi: 14800, Architecture: "amd64"},
+	"m7i.large":  {VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"},
+	"m7i.xlarge": {VCPUs: 3600, MemoryMi: 14800, Architecture: "amd64"},
 
 	// C6i family (amd64, compute-optimized)
 	"c6i.large":   {VCPUs: 1800, MemoryMi: 3500, Architecture: "amd64"},

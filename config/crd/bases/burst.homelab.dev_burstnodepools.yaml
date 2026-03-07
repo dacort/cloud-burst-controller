@@ -59,8 +59,36 @@ spec:
                     description: AMI ID for Talos instances.
                     type: string
                   instanceType:
-                    description: EC2 instance type.
+                    description: |-
+                      EC2 instance type (deprecated, use InstanceTypes).
+                      Used as fallback if InstanceTypes is empty.
                     type: string
+                  instanceTypes:
+                    description: |-
+                      Ordered list of instance type candidates. The provisioner selects the
+                      smallest type that fits pending pod requirements, with automatic fallback
+                      on capacity errors.
+                    items:
+                      description: InstanceTypeConfig describes a single EC2 instance
+                        type with optional overrides.
+                      properties:
+                        ami:
+                          description: Override pool-level AMI (e.g. for GPU-specific
+                            AMI).
+                          type: string
+                        architecture:
+                          description: 'CPU architecture: "amd64" (default) or "arm64".'
+                          enum:
+                          - amd64
+                          - arm64
+                          type: string
+                        name:
+                          description: EC2 instance type, e.g. "m6i.xlarge".
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
                   region:
                     description: AWS region for EC2 instances.
                     type: string
@@ -88,7 +116,6 @@ spec:
                     type: string
                 required:
                 - ami
-                - instanceType
                 - region
                 - securityGroupIds
                 - subnetId
@@ -267,6 +294,9 @@ spec:
                   properties:
                     instanceId:
                       description: Cloud provider instance ID.
+                      type: string
+                    instanceType:
+                      description: The EC2 instance type that was actually launched.
                       type: string
                     lastPodFinished:
                       description: When the last non-daemonset pod finished on this
