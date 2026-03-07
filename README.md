@@ -1,135 +1,135 @@
-# cloud-burst-controller
-// TODO(user): Add simple overview of use/purpose
+# Cloud Burst Controller
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A Kubernetes controller that automatically provisions cloud instances (EC2) to handle unschedulable pods. When pods can't be scheduled on existing nodes, the controller matches them to a `BurstNodePool`, selects an appropriately-sized instance type, launches it with [Talos Linux](https://www.talos.dev/), and tears it down when idle.
 
-## Getting Started
+## Features
+
+- **Pod-aware instance selection** — picks the smallest instance type that fits pending pod CPU, memory, and GPU requirements
+- **Multi-instance-type fallback** — tries candidates in order, automatically falling back on EC2 capacity errors
+- **Architecture filtering** — respects `kubernetes.io/arch` node affinity for amd64/arm64 (Graviton) workloads
+- **GPU support** — matches `nvidia.com/gpu` resource requests to GPU instance families (G5, P3)
+- **Resource-based matching rules** — route pods to pools using toleration, node affinity, and resource request rules
+- **Automatic scale-down** — reaps idle burst nodes after a configurable cooldown period
+- **Orphan detection** — cleans up cloud instances that no longer have a corresponding Kubernetes node
+
+## How It Works
+
+1. The **Provisioner** watches for unschedulable pods with the `burst.homelab.dev/enabled: "true"` annotation
+2. Pods are matched to a `BurstNodePool` based on tolerations, node affinity labels, and resource rules
+3. The instance selector filters the pool's candidate instance types by CPU, memory, GPU, and architecture
+4. EC2 instances are launched with Talos machine configs, with automatic fallback if a type is capacity-constrained
+5. The **Reaper** monitors burst nodes and terminates them after the cooldown period with no running workloads
+6. The **Orphan Detector** reconciles cloud state with the Kubernetes API to clean up stale instances
+
+## Quick Start
 
 ### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+- Go 1.24.6+
+- Docker 17.03+
+- kubectl v1.11.3+
+- Access to a Kubernetes cluster
+- AWS credentials with EC2 permissions
 
-```sh
-make docker-build docker-push IMG=<some-registry>/cloud-burst-controller:tag
-```
-
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
+### Install CRDs and deploy
 
 ```sh
 make install
+make deploy IMG=ghcr.io/dacort/cloud-burst-controller:latest
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+### Create a BurstNodePool
+
+```yaml
+apiVersion: burst.homelab.dev/v1alpha1
+kind: BurstNodePool
+metadata:
+  name: default-burst
+spec:
+  cloud: aws
+  aws:
+    region: us-east-1
+    ami: ami-0123456789abcdef0
+    instanceTypes:
+      - name: m6i.large
+      - name: m6i.xlarge
+      - name: m6i.2xlarge
+    subnetId: subnet-abc123
+    securityGroupIds:
+      - sg-abc123
+  talos:
+    machineConfigSecret: talos-worker-config
+  scaling:
+    maxNodes: 5
+    cooldownPeriod: 5m
+    bootTimeout: 5m
+  matchRules:
+    tolerations:
+      - key: burst.homelab.dev/node
+        operator: Exists
+```
+
+### Annotate pods for bursting
+
+```yaml
+metadata:
+  annotations:
+    burst.homelab.dev/enabled: "true"
+```
+
+## Configuration
+
+### Instance Types
+
+You can specify a single instance type (backward-compatible) or an ordered list of candidates:
+
+```yaml
+aws:
+  # Simple (single type):
+  instanceType: m6i.large
+
+  # Advanced (multiple candidates with overrides):
+  instanceTypes:
+    - name: m7g.large        # arm64 Graviton
+    - name: m6i.large        # amd64 fallback
+    - name: g5.xlarge        # GPU workloads
+      ami: ami-gpu-specific  # per-type AMI override
+```
+
+The provisioner selects the smallest type that fits pending pod requirements and falls back to larger types on capacity errors.
+
+### Match Rules
+
+Pods are routed to pools using three rule types:
+
+| Rule | Description |
+|------|-------------|
+| `tolerations` | Pod must have matching tolerations |
+| `nodeAffinityLabels` | Pod must request matching node affinity labels |
+| `resources` | Pod must have (or not have) specific resource requests (`Exists` / `DoesNotExist`) |
+
+### GPU Pools
+
+```yaml
+matchRules:
+  resources:
+    - resourceName: nvidia.com/gpu
+      operator: Exists
+aws:
+  instanceTypes:
+    - name: g5.xlarge
+    - name: g5.2xlarge
+```
+
+## Development
 
 ```sh
-make deploy IMG=<some-registry>/cloud-burst-controller:tag
+make generate    # Regenerate CRD manifests and deepcopy
+make test        # Run unit tests
+make lint        # Run golangci-lint
+make run         # Run controller locally against current kubeconfig
 ```
-
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
-
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
-```
-
->**NOTE**: Ensure that the samples has default values to test it out.
-
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/cloud-burst-controller:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/cloud-burst-controller/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Copyright 2026. Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
