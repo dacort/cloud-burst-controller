@@ -5,13 +5,13 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: cloud-burst-controller
     app.kubernetes.io/managed-by: kustomize
-  name: system
+  name: cloud-burst-system
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
-  namespace: system
+  name: cloud-burst-controller
+  namespace: cloud-burst-system
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: cloud-burst-controller
@@ -88,12 +88,12 @@ spec:
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
           limits:
-            cpu: 500m
+            cpu: 200m
             memory: 128Mi
           requests:
-            cpu: 10m
+            cpu: 100m
             memory: 64Mi
         volumeMounts: []
       volumes: []
-      serviceAccountName: controller-manager
+      serviceAccountName: cloud-burst-controller
       terminationGracePeriodSeconds: 10

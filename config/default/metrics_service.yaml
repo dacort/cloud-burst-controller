@@ -5,8 +5,8 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: cloud-burst-controller
     app.kubernetes.io/managed-by: kustomize
-  name: controller-manager-metrics-service
-  namespace: system
+  name: cloud-burst-controller-metrics-service
+  namespace: cloud-burst-system
 spec:
   ports:
   - name: https
