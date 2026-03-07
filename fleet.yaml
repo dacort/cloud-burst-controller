@@ -1,0 +1,4 @@
+defaultNamespace: cloud-burst-controller-system
+
+kustomize:
+  dir: config/default

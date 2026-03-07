@@ -25,20 +25,47 @@ A Kubernetes controller that automatically provisions cloud instances (EC2) to h
 
 ### Prerequisites
 
-- Go 1.24.6+
-- Docker 17.03+
 - kubectl v1.11.3+
 - Access to a Kubernetes cluster
-- AWS credentials with EC2 permissions
+- AWS credentials with EC2 permissions (`ec2:RunInstances`, `ec2:TerminateInstances`, `ec2:DescribeInstances`, `ec2:CreateTags`)
 
-### Install CRDs and deploy
+### 1. Create the AWS credentials Secret
+
+The controller uses the standard AWS SDK credential chain. The simplest approach is a Secret with access keys mounted as environment variables:
+
+```sh
+kubectl create namespace cloud-burst-controller-system
+
+kubectl -n cloud-burst-controller-system create secret generic aws-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=AKIA... \
+  --from-literal=AWS_SECRET_ACCESS_KEY=...
+```
+
+### 2. Create the Talos machine config Secret
+
+The controller reads a Talos worker machine config from a Kubernetes Secret to pass as EC2 user data:
+
+```sh
+kubectl -n cloud-burst-controller-system create secret generic talos-worker-config \
+  --from-file=worker.yaml=/path/to/your/worker.yaml
+```
+
+### 3. Install CRDs and deploy
 
 ```sh
 make install
 make deploy IMG=ghcr.io/dacort/cloud-burst-controller:latest
 ```
 
-### Create a BurstNodePool
+Or deploy from the pre-built manifest:
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/dacort/cloud-burst-controller/main/dist/install.yaml
+```
+
+The deployment automatically mounts a Secret named `aws-credentials` as environment variables via the kustomize overlay.
+
+### 4. Create a BurstNodePool
 
 ```yaml
 apiVersion: burst.homelab.dev/v1alpha1
@@ -120,6 +147,25 @@ aws:
     - name: g5.xlarge
     - name: g5.2xlarge
 ```
+
+## Deploying with Rancher Fleet
+
+This repo includes a `fleet.yaml` for deploying via [Rancher Fleet](https://fleet.rancher.io/). Create a `GitRepo` pointing at this repository:
+
+```yaml
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: cloud-burst-controller
+  namespace: fleet-local
+spec:
+  repo: https://github.com/dacort/cloud-burst-controller
+  branch: main
+  paths:
+    - "."
+```
+
+The `fleet.yaml` uses kustomize to deploy from `config/default/` and patches the controller deployment to load AWS credentials from a Secret named `aws-credentials`. You'll still need to create the AWS credentials and Talos machine config Secrets in the `cloud-burst-controller-system` namespace before (or alongside) the Fleet deployment.
 
 ## Development
 

@@ -40,6 +40,10 @@ patches:
 - path: manager_metrics_patch.yaml
   target:
     kind: Deployment
+# [AWS] Mount AWS credentials from a Secret named "aws-credentials".
+- path: manager_aws_credentials_patch.yaml
+  target:
+    kind: Deployment
 
 # Uncomment the patches line if you enable Metrics and CertManager
 # [METRICS-WITH-CERTS] To enable metrics protected with certManager, uncomment the following line.
