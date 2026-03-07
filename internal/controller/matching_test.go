@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	burstv1alpha1 "github.com/dacort/cloud-burst-controller/api/v1alpha1"
@@ -127,6 +128,84 @@ func TestMatchPodToPool_MultiplePoolsFirstAlphabeticalWins(t *testing.T) {
 	result := MatchPodToPool(pod, []burstv1alpha1.BurstNodePool{poolB, poolA})
 	require.NotNil(t, result)
 	assert.Equal(t, "alpha-burst", result.Name)
+}
+
+func TestMatchPodToPool_ResourceExists(t *testing.T) {
+	pool := burstv1alpha1.BurstNodePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-pool"},
+		Spec: burstv1alpha1.BurstNodePoolSpec{
+			MatchRules: burstv1alpha1.MatchRules{
+				Resources: []burstv1alpha1.ResourceRule{
+					{ResourceName: "nvidia.com/gpu", Operator: "Exists"},
+				},
+			},
+		},
+	}
+
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := MatchPodToPool(pod, []burstv1alpha1.BurstNodePool{pool})
+	require.NotNil(t, result)
+	assert.Equal(t, "gpu-pool", result.Name)
+}
+
+func TestMatchPodToPool_ResourceDoesNotExist(t *testing.T) {
+	pool := burstv1alpha1.BurstNodePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "cpu-pool"},
+		Spec: burstv1alpha1.BurstNodePoolSpec{
+			MatchRules: burstv1alpha1.MatchRules{
+				Resources: []burstv1alpha1.ResourceRule{
+					{ResourceName: "nvidia.com/gpu", Operator: "DoesNotExist"},
+				},
+			},
+		},
+	}
+
+	// Pod WITHOUT GPU
+	podNoGPU := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+	}
+	result := MatchPodToPool(podNoGPU, []burstv1alpha1.BurstNodePool{pool})
+	require.NotNil(t, result)
+
+	// Pod WITH GPU should NOT match
+	podGPU := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+	}
+	result = MatchPodToPool(podGPU, []burstv1alpha1.BurstNodePool{pool})
+	assert.Nil(t, result)
 }
 
 func TestIsBurstEnabled(t *testing.T) {

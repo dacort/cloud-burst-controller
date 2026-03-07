@@ -25,42 +25,85 @@ import (
 
 // InstanceCapacity describes the allocatable resources of an instance type.
 type InstanceCapacity struct {
-	VCPUs    int64 // millicores
-	MemoryMi int64 // mebibytes
+	VCPUs        int64  // millicores
+	MemoryMi     int64  // mebibytes
+	GPUs         int32  // GPU count
+	Architecture string // "amd64" or "arm64"
 }
 
 // Known instance type capacities (allocatable, roughly 90% of total).
 var instanceCapacities = map[string]InstanceCapacity{
-	"t3.medium":   {VCPUs: 1800, MemoryMi: 3500},
-	"t3.large":    {VCPUs: 1800, MemoryMi: 7200},
-	"t3.xlarge":   {VCPUs: 3600, MemoryMi: 14800},
-	"m6i.large":   {VCPUs: 1800, MemoryMi: 7200},
-	"m6i.xlarge":  {VCPUs: 3600, MemoryMi: 14800},
-	"m6i.2xlarge": {VCPUs: 7200, MemoryMi: 29600},
-	"m7i.large":   {VCPUs: 1800, MemoryMi: 7200},
-	"m7i.xlarge":  {VCPUs: 3600, MemoryMi: 14800},
-	"c6i.large":   {VCPUs: 1800, MemoryMi: 3500},
-	"c6i.xlarge":  {VCPUs: 3600, MemoryMi: 7200},
-	"r6i.large":   {VCPUs: 1800, MemoryMi: 14800},
-	"r6i.xlarge":  {VCPUs: 3600, MemoryMi: 29600},
+	// T3 family (amd64, burstable)
+	"t3.medium":   {VCPUs: 1800, MemoryMi: 3500, Architecture: "amd64"},
+	"t3.large":    {VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"},
+	"t3.xlarge":   {VCPUs: 3600, MemoryMi: 14800, Architecture: "amd64"},
+	"t3.2xlarge":  {VCPUs: 7200, MemoryMi: 29600, Architecture: "amd64"},
+
+	// M6i family (amd64, general purpose)
+	"m6i.large":   {VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"},
+	"m6i.xlarge":  {VCPUs: 3600, MemoryMi: 14800, Architecture: "amd64"},
+	"m6i.2xlarge": {VCPUs: 7200, MemoryMi: 29600, Architecture: "amd64"},
+	"m6i.4xlarge": {VCPUs: 14400, MemoryMi: 59200, Architecture: "amd64"},
+
+	// M7i family (amd64, general purpose)
+	"m7i.large":   {VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"},
+	"m7i.xlarge":  {VCPUs: 3600, MemoryMi: 14800, Architecture: "amd64"},
+
+	// C6i family (amd64, compute-optimized)
+	"c6i.large":   {VCPUs: 1800, MemoryMi: 3500, Architecture: "amd64"},
+	"c6i.xlarge":  {VCPUs: 3600, MemoryMi: 7200, Architecture: "amd64"},
+	"c6i.2xlarge": {VCPUs: 7200, MemoryMi: 14800, Architecture: "amd64"},
+
+	// R6i family (amd64, memory-optimized)
+	"r6i.large":   {VCPUs: 1800, MemoryMi: 14800, Architecture: "amd64"},
+	"r6i.xlarge":  {VCPUs: 3600, MemoryMi: 29600, Architecture: "amd64"},
+	"r6i.2xlarge": {VCPUs: 7200, MemoryMi: 59200, Architecture: "amd64"},
+
+	// M7g family (arm64, Graviton)
+	"m7g.medium":  {VCPUs: 900, MemoryMi: 3500, Architecture: "arm64"},
+	"m7g.large":   {VCPUs: 1800, MemoryMi: 7200, Architecture: "arm64"},
+	"m7g.xlarge":  {VCPUs: 3600, MemoryMi: 14800, Architecture: "arm64"},
+	"m7g.2xlarge": {VCPUs: 7200, MemoryMi: 29600, Architecture: "arm64"},
+
+	// C7g family (arm64, Graviton, compute-optimized)
+	"c7g.medium":  {VCPUs: 900, MemoryMi: 1800, Architecture: "arm64"},
+	"c7g.large":   {VCPUs: 1800, MemoryMi: 3500, Architecture: "arm64"},
+	"c7g.xlarge":  {VCPUs: 3600, MemoryMi: 7200, Architecture: "arm64"},
+	"c7g.2xlarge": {VCPUs: 7200, MemoryMi: 14800, Architecture: "arm64"},
+
+	// R7g family (arm64, Graviton, memory-optimized)
+	"r7g.large":   {VCPUs: 1800, MemoryMi: 14800, Architecture: "arm64"},
+	"r7g.xlarge":  {VCPUs: 3600, MemoryMi: 29600, Architecture: "arm64"},
+	"r7g.2xlarge": {VCPUs: 7200, MemoryMi: 59200, Architecture: "arm64"},
+
+	// G5 family (amd64, GPU - NVIDIA A10G)
+	"g5.xlarge":  {VCPUs: 3600, MemoryMi: 14800, GPUs: 1, Architecture: "amd64"},
+	"g5.2xlarge": {VCPUs: 7200, MemoryMi: 29600, GPUs: 1, Architecture: "amd64"},
+	"g5.4xlarge": {VCPUs: 14400, MemoryMi: 59200, GPUs: 1, Architecture: "amd64"},
+
+	// P3 family (amd64, GPU - NVIDIA V100)
+	"p3.2xlarge":  {VCPUs: 7200, MemoryMi: 56000, GPUs: 1, Architecture: "amd64"},
+	"p3.8xlarge":  {VCPUs: 28800, MemoryMi: 224000, GPUs: 4, Architecture: "amd64"},
+	"p3.16xlarge": {VCPUs: 57600, MemoryMi: 448000, GPUs: 8, Architecture: "amd64"},
 }
 
 // defaultCapacity is used when instance type is not in the table.
-var defaultCapacity = InstanceCapacity{VCPUs: 1800, MemoryMi: 7200}
+var defaultCapacity = InstanceCapacity{VCPUs: 1800, MemoryMi: 7200, Architecture: "amd64"}
+
+// GetInstanceCapacity returns the capacity for a known instance type.
+func GetInstanceCapacity(instanceType string) (InstanceCapacity, bool) {
+	cap, ok := instanceCapacities[instanceType]
+	return cap, ok
+}
 
 // CalculateNodesNeeded determines how many new nodes to launch given:
 // - pending pods that need scheduling
-// - the instance type to use
+// - the capacity of the selected instance type
 // - current active + pending node count
 // - max nodes allowed
-func CalculateNodesNeeded(pods []corev1.Pod, instanceType string, currentNodes, maxNodes int32) int32 {
+func CalculateNodesNeeded(pods []corev1.Pod, capacity InstanceCapacity, currentNodes, maxNodes int32) int32 {
 	if currentNodes >= maxNodes {
 		return 0
-	}
-
-	capacity, ok := instanceCapacities[instanceType]
-	if !ok {
-		capacity = defaultCapacity
 	}
 
 	podsPerNode := estimatePodsPerNode(pods, capacity)

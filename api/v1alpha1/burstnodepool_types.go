@@ -48,6 +48,21 @@ type BurstNodePoolSpec struct {
 	NodeTaints []NodeTaint `json:"nodeTaints,omitempty"`
 }
 
+// InstanceTypeConfig describes a single EC2 instance type with optional overrides.
+type InstanceTypeConfig struct {
+	// EC2 instance type, e.g. "m6i.xlarge".
+	Name string `json:"name"`
+
+	// Override pool-level AMI (e.g. for GPU-specific AMI).
+	// +optional
+	AMI string `json:"ami,omitempty"`
+
+	// CPU architecture: "amd64" (default) or "arm64".
+	// +kubebuilder:validation:Enum=amd64;arm64
+	// +optional
+	Architecture string `json:"architecture,omitempty"`
+}
+
 type AWSConfig struct {
 	// AWS region for EC2 instances.
 	Region string `json:"region"`
@@ -55,8 +70,16 @@ type AWSConfig struct {
 	// AMI ID for Talos instances.
 	AMI string `json:"ami"`
 
-	// EC2 instance type.
-	InstanceType string `json:"instanceType"`
+	// EC2 instance type (deprecated, use InstanceTypes).
+	// Used as fallback if InstanceTypes is empty.
+	// +optional
+	InstanceType string `json:"instanceType,omitempty"`
+
+	// Ordered list of instance type candidates. The provisioner selects the
+	// smallest type that fits pending pod requirements, with automatic fallback
+	// on capacity errors.
+	// +optional
+	InstanceTypes []InstanceTypeConfig `json:"instanceTypes,omitempty"`
 
 	// Subnet ID for instance placement.
 	SubnetID string `json:"subnetId"`
@@ -75,6 +98,18 @@ type AWSConfig struct {
 	// Additional EC2 tags.
 	// +optional
 	Tags map[string]string `json:"tags,omitempty"`
+}
+
+// ResolveInstanceTypes returns the effective instance type list.
+// If InstanceTypes is set, returns it. Otherwise wraps InstanceType as a single-entry list.
+func (a *AWSConfig) ResolveInstanceTypes() []InstanceTypeConfig {
+	if len(a.InstanceTypes) > 0 {
+		return a.InstanceTypes
+	}
+	if a.InstanceType != "" {
+		return []InstanceTypeConfig{{Name: a.InstanceType}}
+	}
+	return nil
 }
 
 type TalosConfig struct {
@@ -168,6 +203,10 @@ type BurstNodeStatus struct {
 
 	// Cloud provider instance ID.
 	InstanceID string `json:"instanceId"`
+
+	// The EC2 instance type that was actually launched.
+	// +optional
+	InstanceType string `json:"instanceType,omitempty"`
 
 	// Current lifecycle state.
 	State NodeState `json:"state"`

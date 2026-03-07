@@ -39,6 +39,7 @@ import (
 
 	burstv1alpha1 "github.com/dacort/cloud-burst-controller/api/v1alpha1"
 	"github.com/dacort/cloud-burst-controller/internal/cloud"
+	awscloud "github.com/dacort/cloud-burst-controller/internal/cloud/aws"
 	"github.com/dacort/cloud-burst-controller/internal/talos"
 )
 
@@ -132,13 +133,26 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	instanceType := pool.Spec.AWS.InstanceType
-	nodesNeeded := CalculateNodesNeeded(matchingPods, instanceType, currentNodes, pool.Spec.Scaling.MaxNodes)
+	// Select instance type candidates that fit the pods.
+	candidates := SelectInstanceTypes(pool, matchingPods)
+	if len(candidates) == 0 {
+		logger.Info("no instance type can fit pending pods", "pool", pool.Name, "pendingPods", len(matchingPods))
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	// Use the first (smallest fitting) candidate for capacity calculation.
+	selectedType := candidates[0]
+	capacity, ok := GetInstanceCapacity(selectedType.Name)
+	if !ok {
+		capacity = defaultCapacity
+	}
+	nodesNeeded := CalculateNodesNeeded(matchingPods, capacity, currentNodes, pool.Spec.Scaling.MaxNodes)
 	if nodesNeeded <= 0 {
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	logger.Info("provisioning burst nodes", "pool", pool.Name, "count", nodesNeeded)
+	logger.Info("provisioning burst nodes", "pool", pool.Name, "count", nodesNeeded,
+		"primaryType", selectedType.Name, "candidates", len(candidates))
 
 	// Read Talos config secret
 	var secret corev1.Secret
@@ -158,7 +172,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("key %q not found in secret %s", configKey, secretKey)
 	}
 
-	// Launch nodes
+	// Launch nodes with fallback on capacity errors.
 	for range nodesNeeded {
 		nodeName := fmt.Sprintf("burst-%s-%s", pool.Name, randomSuffix())
 
@@ -168,32 +182,22 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			continue
 		}
 
-		opts := cloud.LaunchOptions{
-			Name:             nodeName,
-			AMI:              pool.Spec.AWS.AMI,
-			InstanceType:     instanceType,
-			SubnetID:         pool.Spec.AWS.SubnetID,
-			SecurityGroupIDs: pool.Spec.AWS.SecurityGroupIDs,
-			VolumeSize:       pool.Spec.AWS.VolumeSize,
-			VolumeType:       pool.Spec.AWS.VolumeType,
-			UserData:         userData,
-			Tags:             pool.Spec.AWS.Tags,
-		}
-
-		instanceID, err := r.CloudProvider.LaunchNode(ctx, opts)
-		if err != nil {
-			logger.Error(err, "failed to launch burst node", "pool", pool.Name, "nodeName", nodeName)
+		instanceID, launchedType, launchErr := r.launchWithFallback(ctx, pool, candidates, nodeName, userData)
+		if launchErr != nil {
+			logger.Error(launchErr, "failed to launch burst node", "pool", pool.Name, "nodeName", nodeName)
 			continue
 		}
 
-		logger.Info("launched burst node", "pool", pool.Name, "nodeName", nodeName, "instanceID", instanceID)
+		logger.Info("launched burst node", "pool", pool.Name, "nodeName", nodeName,
+			"instanceID", instanceID, "instanceType", launchedType)
 
 		// Update pool status with pending node
 		pool.Status.Nodes = append(pool.Status.Nodes, burstv1alpha1.BurstNodeStatus{
-			Name:       nodeName,
-			InstanceID: instanceID,
-			State:      burstv1alpha1.NodeStatePending,
-			LaunchedAt: metav1.Now(),
+			Name:         nodeName,
+			InstanceID:   instanceID,
+			InstanceType: launchedType,
+			State:        burstv1alpha1.NodeStatePending,
+			LaunchedAt:   metav1.Now(),
 		})
 		pool.Status.PendingNodes++
 	}
@@ -213,6 +217,49 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// launchWithFallback tries each candidate instance type in order.
+// On capacity errors, it falls back to the next candidate.
+func (r *ProvisionerReconciler) launchWithFallback(
+	ctx context.Context,
+	pool *burstv1alpha1.BurstNodePool,
+	candidates []burstv1alpha1.InstanceTypeConfig,
+	nodeName string,
+	userData string,
+) (instanceID string, instanceType string, err error) {
+	logger := log.FromContext(ctx)
+
+	for _, candidate := range candidates {
+		ami := pool.Spec.AWS.AMI
+		if candidate.AMI != "" {
+			ami = candidate.AMI
+		}
+
+		opts := cloud.LaunchOptions{
+			Name:             nodeName,
+			AMI:              ami,
+			InstanceType:     candidate.Name,
+			SubnetID:         pool.Spec.AWS.SubnetID,
+			SecurityGroupIDs: pool.Spec.AWS.SecurityGroupIDs,
+			VolumeSize:       pool.Spec.AWS.VolumeSize,
+			VolumeType:       pool.Spec.AWS.VolumeType,
+			UserData:         userData,
+			Tags:             pool.Spec.AWS.Tags,
+		}
+
+		id, launchErr := r.CloudProvider.LaunchNode(ctx, opts)
+		if launchErr != nil {
+			if awscloud.IsCapacityError(launchErr) {
+				logger.Info("capacity unavailable, trying next type",
+					"type", candidate.Name, "error", launchErr.Error())
+				continue
+			}
+			return "", "", fmt.Errorf("launching %s: %w", candidate.Name, launchErr)
+		}
+		return id, candidate.Name, nil
+	}
+	return "", "", fmt.Errorf("all instance type candidates exhausted (capacity unavailable)")
 }
 
 func (r *ProvisionerReconciler) debouncePeriod() time.Duration {

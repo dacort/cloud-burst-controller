@@ -2,12 +2,14 @@ package aws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/smithy-go"
 	"github.com/dacort/cloud-burst-controller/internal/cloud"
 )
 
@@ -114,9 +116,10 @@ func (p *EC2Provider) ListManagedNodes(ctx context.Context) ([]cloud.CloudNode, 
 	for _, reservation := range result.Reservations {
 		for _, instance := range reservation.Instances {
 			node := cloud.CloudNode{
-				InstanceID: aws.ToString(instance.InstanceId),
-				State:      string(instance.State.Name),
-				Tags:       make(map[string]string),
+				InstanceID:   aws.ToString(instance.InstanceId),
+				InstanceType: string(instance.InstanceType),
+				State:        string(instance.State.Name),
+				Tags:         make(map[string]string),
 			}
 			if instance.LaunchTime != nil {
 				node.LaunchedAt = *instance.LaunchTime
@@ -131,4 +134,19 @@ func (p *EC2Provider) ListManagedNodes(ctx context.Context) ([]cloud.CloudNode, 
 		}
 	}
 	return nodes, nil
+}
+
+// IsCapacityError returns true if the error is an EC2 capacity-related error
+// that should trigger fallback to the next instance type candidate.
+func IsCapacityError(err error) bool {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "InsufficientInstanceCapacity",
+			"InstanceLimitExceeded",
+			"Unsupported":
+			return true
+		}
+	}
+	return false
 }

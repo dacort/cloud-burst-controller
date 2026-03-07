@@ -49,7 +49,7 @@ func makePodWithResources(cpu, mem string) corev1.Pod {
 
 func TestCalculateNodesNeeded_OnePodNoPending(t *testing.T) {
 	pods := []corev1.Pod{makePodWithResources("1", "1Gi")}
-	needed := CalculateNodesNeeded(pods, "m6i.large", 0, 3)
+	needed := CalculateNodesNeeded(pods, capacityFor("m6i.large"), 0, 3)
 	assert.Equal(t, int32(1), needed)
 }
 
@@ -62,7 +62,7 @@ func TestCalculateNodesNeeded_FourPodsZeroPending(t *testing.T) {
 		makePodWithResources("1", "1Gi"),
 		makePodWithResources("1", "1Gi"),
 	}
-	needed := CalculateNodesNeeded(pods, "m6i.large", 0, 5)
+	needed := CalculateNodesNeeded(pods, capacityFor("m6i.large"), 0, 5)
 	// 1800/1000 = 1 pod/node → 4 nodes needed
 	assert.Equal(t, int32(4), needed)
 }
@@ -75,13 +75,13 @@ func TestCalculateNodesNeeded_FourPodsOnePending(t *testing.T) {
 		makePodWithResources("1", "1Gi"),
 	}
 	// 1 node already pending, need 4 nodes for 4 pods, but only 4 slots available (5-1)
-	needed := CalculateNodesNeeded(pods, "m6i.large", 1, 5)
+	needed := CalculateNodesNeeded(pods, capacityFor("m6i.large"), 1, 5)
 	assert.Equal(t, int32(4), needed)
 }
 
 func TestCalculateNodesNeeded_AtMaxNodes(t *testing.T) {
 	pods := []corev1.Pod{makePodWithResources("1", "1Gi")}
-	needed := CalculateNodesNeeded(pods, "m6i.large", 3, 3)
+	needed := CalculateNodesNeeded(pods, capacityFor("m6i.large"), 3, 3)
 	assert.Equal(t, int32(0), needed)
 }
 
@@ -94,7 +94,7 @@ func TestCalculateNodesNeeded_CapsAtMaxAvailable(t *testing.T) {
 		makePodWithResources("1", "1Gi"),
 	}
 	// Need 5 but only 2 available
-	needed := CalculateNodesNeeded(pods, "m6i.large", 1, 3)
+	needed := CalculateNodesNeeded(pods, capacityFor("m6i.large"), 1, 3)
 	assert.Equal(t, int32(2), needed)
 }
 
@@ -105,7 +105,7 @@ func TestCalculateNodesNeeded_SmallPodsMultiplePerNode(t *testing.T) {
 	for i := range pods {
 		pods[i] = makePodWithResources("500m", "512Mi")
 	}
-	needed := CalculateNodesNeeded(pods, "m6i.xlarge", 0, 5)
+	needed := CalculateNodesNeeded(pods, capacityFor("m6i.xlarge"), 0, 5)
 	// 14 pods / 7 per node = 2 nodes
 	assert.Equal(t, int32(2), needed)
 }
@@ -116,6 +116,15 @@ func TestCalculateNodesNeeded_NoResourceRequests(t *testing.T) {
 		makePodWithResources("", ""),
 	}
 	// No resource requests → 1 pod per node assumed
-	needed := CalculateNodesNeeded(pods, "m6i.large", 0, 5)
+	needed := CalculateNodesNeeded(pods, capacityFor("m6i.large"), 0, 5)
 	assert.Equal(t, int32(2), needed)
+}
+
+// capacityFor is a test helper to look up instance capacity by type name.
+func capacityFor(instanceType string) InstanceCapacity {
+	cap, ok := GetInstanceCapacity(instanceType)
+	if !ok {
+		return defaultCapacity
+	}
+	return cap
 }

@@ -17,9 +17,10 @@ type LaunchOptions struct {
 
 // CloudNode represents a cloud instance managed by the controller.
 type CloudNode struct {
-	InstanceID string
-	Name       string
-	State      string // running, stopped, terminated, etc.
-	LaunchedAt time.Time
-	Tags       map[string]string
+	InstanceID   string
+	InstanceType string
+	Name         string
+	State        string // running, stopped, terminated, etc.
+	LaunchedAt   time.Time
+	Tags         map[string]string
 }

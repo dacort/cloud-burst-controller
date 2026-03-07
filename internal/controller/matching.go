@@ -62,7 +62,39 @@ func podMatchesPool(pod *corev1.Pod, pool *burstv1alpha1.BurstNodePool) bool {
 		}
 	}
 
+	// Check resource rules: pod must match resource requirements
+	for _, rule := range rules.Resources {
+		if !podMatchesResourceRule(pod, rule) {
+			return false
+		}
+	}
+
 	return true
+}
+
+// podMatchesResourceRule checks if a pod matches a single resource rule.
+func podMatchesResourceRule(pod *corev1.Pod, rule burstv1alpha1.ResourceRule) bool {
+	resName := corev1.ResourceName(rule.ResourceName)
+	hasResource := false
+	for _, c := range pod.Spec.Containers {
+		if _, ok := c.Resources.Requests[resName]; ok {
+			hasResource = true
+			break
+		}
+		if _, ok := c.Resources.Limits[resName]; ok {
+			hasResource = true
+			break
+		}
+	}
+
+	switch rule.Operator {
+	case "Exists":
+		return hasResource
+	case "DoesNotExist":
+		return !hasResource
+	default:
+		return false
+	}
 }
 
 // podHasToleration checks if a pod has a toleration matching the rule.
