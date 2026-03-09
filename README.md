@@ -34,9 +34,9 @@ A Kubernetes controller that automatically provisions cloud instances (EC2) to h
 The controller uses the standard AWS SDK credential chain. The simplest approach is a Secret with access keys mounted as environment variables:
 
 ```sh
-kubectl create namespace cloud-burst-controller-system
+kubectl create namespace cloud-burst-system
 
-kubectl -n cloud-burst-controller-system create secret generic aws-credentials \
+kubectl -n cloud-burst-system create secret generic aws-burst-credentials \
   --from-literal=AWS_ACCESS_KEY_ID=AKIA... \
   --from-literal=AWS_SECRET_ACCESS_KEY=...
 ```
@@ -46,7 +46,7 @@ kubectl -n cloud-burst-controller-system create secret generic aws-credentials \
 The controller reads a Talos worker machine config from a Kubernetes Secret to pass as EC2 user data:
 
 ```sh
-kubectl -n cloud-burst-controller-system create secret generic talos-worker-config \
+kubectl -n cloud-burst-system create secret generic talos-worker-config \
   --from-file=worker.yaml=/path/to/your/worker.yaml
 ```
 
@@ -63,7 +63,7 @@ Or deploy from the pre-built manifest:
 kubectl apply -f https://raw.githubusercontent.com/dacort/cloud-burst-controller/main/dist/install.yaml
 ```
 
-The deployment automatically mounts a Secret named `aws-credentials` as environment variables via the kustomize overlay.
+The deployment automatically mounts a Secret named `aws-burst-credentials` as environment variables via the kustomize overlay.
 
 ### 4. Create a BurstNodePool
 
@@ -165,7 +165,7 @@ spec:
     - "."
 ```
 
-The `fleet.yaml` uses kustomize to deploy from `config/default/` and patches the controller deployment to load AWS credentials from a Secret named `aws-credentials`. You'll still need to create the AWS credentials and Talos machine config Secrets in the `cloud-burst-controller-system` namespace before (or alongside) the Fleet deployment.
+The `fleet.yaml` uses kustomize to deploy from `config/default/` and patches the controller deployment to load AWS credentials from a Secret named `aws-burst-credentials`. You'll still need to create the AWS credentials and Talos machine config Secrets in the `cloud-burst-system` namespace before (or alongside) the Fleet deployment.
 
 ## Development
 
