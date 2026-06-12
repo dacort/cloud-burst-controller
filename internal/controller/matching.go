@@ -25,23 +25,40 @@ import (
 	burstv1alpha1 "github.com/dacort/cloud-burst-controller/api/v1alpha1"
 )
 
-// MatchPodToPool finds the first BurstNodePool that matches a pod's tolerations
-// and node affinity labels. Pools are sorted alphabetically by name for determinism.
+// MatchPodToPool finds the most specific BurstNodePool that matches a pod's
+// tolerations and node affinity labels. Each matching pool is scored by the
+// number of match rules beyond bare tolerations (+1 per NodeAffinityLabel,
+// +1 per Resource rule); the highest score wins so a catch-all pool whose
+// only rule is a toleration cannot shadow a pool targeted via node affinity.
+// Equal scores tie-break alphabetically by name for determinism.
 // Returns nil if no pool matches.
 func MatchPodToPool(pod *corev1.Pod, pools []burstv1alpha1.BurstNodePool) *burstv1alpha1.BurstNodePool {
-	// Sort pools alphabetically for deterministic matching
+	// Sort pools alphabetically so equal specificity scores are deterministic
 	sorted := make([]burstv1alpha1.BurstNodePool, len(pools))
 	copy(sorted, pools)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Name < sorted[j].Name
 	})
 
+	var best *burstv1alpha1.BurstNodePool
+	bestScore := -1
 	for i := range sorted {
-		if podMatchesPool(pod, &sorted[i]) {
-			return &sorted[i]
+		if !podMatchesPool(pod, &sorted[i]) {
+			continue
+		}
+		if score := poolSpecificityScore(&sorted[i]); score > bestScore {
+			best = &sorted[i]
+			bestScore = score
 		}
 	}
-	return nil
+	return best
+}
+
+// poolSpecificityScore counts a pool's match rules beyond bare tolerations.
+// Toleration-only pools score 0, so they only win when no targeted pool matches.
+func poolSpecificityScore(pool *burstv1alpha1.BurstNodePool) int {
+	rules := pool.Spec.MatchRules
+	return len(rules.NodeAffinityLabels) + len(rules.Resources)
 }
 
 // podMatchesPool checks whether a pod satisfies a pool's match rules.

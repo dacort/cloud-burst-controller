@@ -108,7 +108,74 @@ func TestMatchPodToPool_WithNodeAffinityLabels(t *testing.T) {
 	assert.Equal(t, "gpu-burst", result.Name)
 }
 
-func TestMatchPodToPool_MultiplePoolsFirstAlphabeticalWins(t *testing.T) {
+func TestMatchPodToPool_SpecificPoolWinsOverGeneral(t *testing.T) {
+	general := makePool("general-burst", []burstv1alpha1.TolerationRule{
+		{Key: "burst.homelab.dev/cloud", Operator: "Exists"},
+	}, nil)
+	m9g := makePool("m9g-burst", []burstv1alpha1.TolerationRule{
+		{Key: "burst.homelab.dev/cloud", Operator: "Exists"},
+	}, map[string]string{
+		"burst.homelab.dev/instance-class": "m9g",
+	})
+
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Tolerations: []corev1.Toleration{
+				{Key: "burst.homelab.dev/cloud", Operator: corev1.TolerationOpExists},
+			},
+			Affinity: &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "burst.homelab.dev/instance-class",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"m9g"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// general-burst sorts first and matches by toleration alone, but the
+	// m9g pool's NodeAffinityLabels rule makes it more specific — it must win.
+	result := MatchPodToPool(pod, []burstv1alpha1.BurstNodePool{general, m9g})
+	require.NotNil(t, result)
+	assert.Equal(t, "m9g-burst", result.Name)
+}
+
+func TestMatchPodToPool_PlainBurstPodRoutesToGeneralPool(t *testing.T) {
+	general := makePool("general-burst", []burstv1alpha1.TolerationRule{
+		{Key: "burst.homelab.dev/cloud", Operator: "Exists"},
+	}, nil)
+	m9g := makePool("m9g-burst", []burstv1alpha1.TolerationRule{
+		{Key: "burst.homelab.dev/cloud", Operator: "Exists"},
+	}, map[string]string{
+		"burst.homelab.dev/instance-class": "m9g",
+	})
+
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Tolerations: []corev1.Toleration{
+				{Key: "burst.homelab.dev/cloud", Operator: corev1.TolerationOpExists},
+			},
+		},
+	}
+
+	// A pod without the m9g affinity doesn't match the m9g pool's rules,
+	// so it lands on the toleration-only general pool.
+	result := MatchPodToPool(pod, []burstv1alpha1.BurstNodePool{general, m9g})
+	require.NotNil(t, result)
+	assert.Equal(t, "general-burst", result.Name)
+}
+
+func TestMatchPodToPool_EqualScoreTieBreaksAlphabetically(t *testing.T) {
 	poolA := makePool("alpha-burst", []burstv1alpha1.TolerationRule{
 		{Key: "burst.homelab.dev/cloud", Operator: "Exists"},
 	}, nil)
@@ -124,7 +191,7 @@ func TestMatchPodToPool_MultiplePoolsFirstAlphabeticalWins(t *testing.T) {
 		},
 	}
 
-	// Pass in reverse order to verify sorting
+	// Both pools score 0 — alphabetical order decides, regardless of input order
 	result := MatchPodToPool(pod, []burstv1alpha1.BurstNodePool{poolB, poolA})
 	require.NotNil(t, result)
 	assert.Equal(t, "alpha-burst", result.Name)
