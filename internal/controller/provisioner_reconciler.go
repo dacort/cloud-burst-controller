@@ -221,18 +221,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// unmarked so it's tried again, after a backoff that grows with each
 	// failure. Marking it here would leave it Pending for good.
 	if launched == 0 {
-		failures := launchFailures(&pod) + 1
-		if pod.Annotations == nil {
-			pod.Annotations = make(map[string]string)
-		}
-		pod.Annotations[annotationLaunchFailures] = strconv.Itoa(failures)
-		if err := r.Update(ctx, &pod); err != nil {
-			logger.Error(err, "failed to record launch failure on pod", "pod", req.NamespacedName)
-		}
-		backoff := launchRetryBackoff(failures)
-		logger.Info("no burst node launched, will retry", "pool", pool.Name, "pod", req.NamespacedName,
-			"failures", failures, "retryAfter", backoff)
-		return ctrl.Result{RequeueAfter: backoff}, nil
+		return r.retryLater(ctx, &pod, pool.Name), nil
 	}
 
 	// Persist status update
@@ -240,17 +229,39 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("updating pool status: %w", err)
 	}
 
-	// Annotate pod to prevent double-provisioning on re-reconcile
+	r.markProvisioned(ctx, &pod)
+	return ctrl.Result{}, nil
+}
+
+// retryLater counts a round of launches that produced no node on the pod
+// and returns when to try it again.
+func (r *ProvisionerReconciler) retryLater(ctx context.Context, pod *corev1.Pod, poolName string) ctrl.Result {
+	logger := log.FromContext(ctx)
+	failures := launchFailures(pod) + 1
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+	pod.Annotations[annotationLaunchFailures] = strconv.Itoa(failures)
+	if err := r.Update(ctx, pod); err != nil {
+		logger.Error(err, "failed to record launch failure on pod", "pod", client.ObjectKeyFromObject(pod))
+	}
+	backoff := launchRetryBackoff(failures)
+	logger.Info("no burst node launched, will retry", "pool", poolName, "pod", client.ObjectKeyFromObject(pod),
+		"failures", failures, "retryAfter", backoff)
+	return ctrl.Result{RequeueAfter: backoff}
+}
+
+// markProvisioned annotates the pod so a re-reconcile doesn't launch
+// another node for it.
+func (r *ProvisionerReconciler) markProvisioned(ctx context.Context, pod *corev1.Pod) {
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
 	pod.Annotations[annotationProvisioned] = labelValueTrue
 	delete(pod.Annotations, annotationLaunchFailures)
-	if err := r.Update(ctx, &pod); err != nil {
-		logger.Error(err, "failed to annotate pod as provisioned", "pod", req.NamespacedName)
+	if err := r.Update(ctx, pod); err != nil {
+		log.FromContext(ctx).Error(err, "failed to annotate pod as provisioned", "pod", client.ObjectKeyFromObject(pod))
 	}
-
-	return ctrl.Result{}, nil
 }
 
 const (
