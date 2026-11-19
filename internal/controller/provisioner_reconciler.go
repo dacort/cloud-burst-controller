@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,7 +112,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	logger.Info("matched unschedulable pod to pool", "pod", req.NamespacedName, "pool", pool.Name)
 
 	// Skip if we already processed this pod (prevents double-provisioning from race conditions)
-	if pod.Annotations != nil && pod.Annotations["burst.homelab.dev/provisioned"] == labelValueTrue {
+	if pod.Annotations[annotationProvisioned] == labelValueTrue {
 		return ctrl.Result{}, nil
 	}
 
@@ -179,6 +180,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Launch nodes with fallback on capacity errors.
+	launched := 0
 	for range nodesNeeded {
 		nodeName := fmt.Sprintf("burst-%s-%s", pool.Name, randomSuffix())
 
@@ -212,6 +214,25 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			LaunchedAt:   metav1.Now(),
 		})
 		pool.Status.PendingNodes++
+		launched++
+	}
+
+	// Nothing launched (capacity, a bad config, an API error): leave the pod
+	// unmarked so it's tried again, after a backoff that grows with each
+	// failure. Marking it here would leave it Pending for good.
+	if launched == 0 {
+		failures := launchFailures(&pod) + 1
+		if pod.Annotations == nil {
+			pod.Annotations = make(map[string]string)
+		}
+		pod.Annotations[annotationLaunchFailures] = strconv.Itoa(failures)
+		if err := r.Update(ctx, &pod); err != nil {
+			logger.Error(err, "failed to record launch failure on pod", "pod", req.NamespacedName)
+		}
+		backoff := launchRetryBackoff(failures)
+		logger.Info("no burst node launched, will retry", "pool", pool.Name, "pod", req.NamespacedName,
+			"failures", failures, "retryAfter", backoff)
+		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
 
 	// Persist status update
@@ -223,12 +244,42 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
-	pod.Annotations["burst.homelab.dev/provisioned"] = labelValueTrue
+	pod.Annotations[annotationProvisioned] = labelValueTrue
+	delete(pod.Annotations, annotationLaunchFailures)
 	if err := r.Update(ctx, &pod); err != nil {
 		logger.Error(err, "failed to annotate pod as provisioned", "pod", req.NamespacedName)
 	}
 
 	return ctrl.Result{}, nil
+}
+
+const (
+	annotationProvisioned = "burst.homelab.dev/provisioned"
+	// annotationLaunchFailures counts launches for a pod that produced no
+	// node, for the retry backoff.
+	annotationLaunchFailures = "burst.homelab.dev/launch-failures"
+
+	launchRetryBase = 30 * time.Second
+	launchRetryMax  = 10 * time.Minute
+)
+
+// launchFailures is how many launches for pod have failed so far.
+func launchFailures(pod *corev1.Pod) int {
+	n, err := strconv.Atoi(pod.Annotations[annotationLaunchFailures])
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// launchRetryBackoff is the wait before trying again after the given
+// number of failed launches: 30s, doubling, at most 10m.
+func launchRetryBackoff(failures int) time.Duration {
+	d := launchRetryBase
+	for i := 1; i < failures && d < launchRetryMax; i++ {
+		d *= 2
+	}
+	return min(d, launchRetryMax)
 }
 
 // launchWithFallback tries each candidate instance type in order.
