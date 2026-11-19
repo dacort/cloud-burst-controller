@@ -178,6 +178,7 @@ func main() {
 		Scheme:         mgr.GetScheme(),
 		CloudProvider:  cloudProvider,
 		DebouncePeriod: debouncePeriod,
+		Recorder:       mgr.GetEventRecorder("cloud-burst-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Provisioner")
 		os.Exit(1)

@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -54,12 +55,17 @@ type ProvisionerReconciler struct {
 	Scheme         *runtime.Scheme
 	CloudProvider  cloud.Provider
 	DebouncePeriod time.Duration
+	// Recorder, if set, puts a Warning event on a pod whose pool can't
+	// launch a node for it (an oversized Talos config, say), where
+	// `kubectl describe pod` shows it; otherwise that's only in the logs.
+	Recorder events.EventRecorder
 }
 
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=burst.homelab.dev,resources=burstnodepools,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=burst.homelab.dev,resources=burstnodepools/status,verbs=get;update;patch
 
@@ -178,7 +184,13 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		userData, err := talos.PatchAndEncode(configData, nodeName)
 		if err != nil {
+			// Checked before RunInstances: an oversized config would only
+			// come back from EC2 as InvalidParameterValue.
 			logger.Error(err, "failed to patch Talos config", "nodeName", nodeName)
+			if r.Recorder != nil {
+				r.Recorder.Eventf(&pod, nil, corev1.EventTypeWarning, "BurstConfigInvalid", "LaunchBurstNode",
+					"pool %s: Talos config in secret %s can't be used as EC2 user data: %v", pool.Name, secretKey, err)
+			}
 			continue
 		}
 
