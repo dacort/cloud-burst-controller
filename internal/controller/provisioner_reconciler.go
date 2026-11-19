@@ -182,7 +182,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	for range nodesNeeded {
 		nodeName := fmt.Sprintf("burst-%s-%s", pool.Name, randomSuffix())
 
-		userData, err := talos.PatchAndEncode(configData, nodeName)
+		userData, err := talos.PatchAndEncode(configData, nodeName, talosTaints(pool.Spec.NodeTaints))
 		if err != nil {
 			// Checked before RunInstances: an oversized config would only
 			// come back from EC2 as InvalidParameterValue.
@@ -358,8 +358,11 @@ func (r *NodeReadyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 					node.Labels = make(map[string]string)
 				}
 				maps.Copy(node.Labels, pool.Spec.NodeLabels)
+				// The Talos config already registers the node with the
+				// pool's taints; this covers a config that dropped them.
+				node.Spec.Taints = withTaints(node.Spec.Taints, pool.Spec.NodeTaints)
 				if err := r.Update(ctx, &node); err != nil {
-					logger.Error(err, "failed to update node labels", "node", node.Name)
+					logger.Error(err, "failed to update node labels and taints", "node", node.Name)
 				}
 
 				if err := r.Status().Update(ctx, pool); err != nil {
@@ -443,4 +446,35 @@ func randomSuffix() string {
 func MapNodeToPodReconcile(ctx context.Context, obj client.Object) []reconcile.Request {
 	// Not used directly - nodes are watched by NodeReadyReconciler
 	return nil
+}
+
+// talosTaints is a pool's node taints in machine.nodeTaints form.
+func talosTaints(taints []burstv1alpha1.NodeTaint) map[string]string {
+	if len(taints) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(taints))
+	for _, t := range taints {
+		out[t.Key] = talos.TaintValue(t.Value, t.Effect)
+	}
+	return out
+}
+
+// withTaints adds each pool taint the node doesn't already carry, by key
+// and effect.
+func withTaints(existing []corev1.Taint, taints []burstv1alpha1.NodeTaint) []corev1.Taint {
+	for _, t := range taints {
+		want := corev1.Taint{Key: t.Key, Value: t.Value, Effect: corev1.TaintEffect(t.Effect)}
+		found := false
+		for _, have := range existing {
+			if have.MatchTaint(&want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			existing = append(existing, want)
+		}
+	}
+	return existing
 }
