@@ -87,8 +87,16 @@ func (r *ReaperReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	nodeStatus := &pool.Status.Nodes[nodeIdx]
 
-	// Only reap Running nodes
-	if nodeStatus.State != burstv1alpha1.NodeStateRunning {
+	switch nodeStatus.State {
+	case burstv1alpha1.NodeStateRunning:
+	case burstv1alpha1.NodeStateCordoned, burstv1alpha1.NodeStateDraining, burstv1alpha1.NodeStateTerminating:
+		// A teardown that stopped partway (a status update conflict, a
+		// failed terminate call, a controller restart) picks up again
+		// here; skipping these states would leave the instance running
+		// for good. Every step is safe to repeat.
+		logger.Info("resuming burst node teardown", "node", node.Name, "pool", pool.Name, "state", nodeStatus.State)
+		return r.teardown(ctx, pool, nodeIdx, &node)
+	default:
 		return ctrl.Result{RequeueAfter: r.checkInterval()}, nil
 	}
 
@@ -133,6 +141,16 @@ func (r *ReaperReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Cooldown expired — begin teardown
 	logger.Info("tearing down idle burst node", "node", node.Name, "pool", pool.Name,
 		"idleDuration", idleDuration, "instanceID", nodeStatus.InstanceID)
+	return r.teardown(ctx, pool, nodeIdx, &node)
+}
+
+// teardown cordons, drains and terminates a burst node, then removes it
+// from the cluster and the pool's status. It records each step in the
+// node's state first, so an attempt that fails partway is resumed by the
+// next reconcile rather than abandoned.
+func (r *ReaperReconciler) teardown(ctx context.Context, pool *burstv1alpha1.BurstNodePool, nodeIdx int, node *corev1.Node) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	nodeStatus := &pool.Status.Nodes[nodeIdx]
 
 	// Step 1: Cordon
 	nodeStatus.State = burstv1alpha1.NodeStateCordoned
@@ -166,7 +184,7 @@ func (r *ReaperReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Step 4: Delete K8s node object
-	if err := r.Delete(ctx, &node); err != nil && !errors.IsNotFound(err) {
+	if err := r.Delete(ctx, node); err != nil && !errors.IsNotFound(err) {
 		logger.Error(err, "failed to delete node object", "node", node.Name)
 	}
 
