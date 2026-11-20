@@ -25,12 +25,24 @@ rules:
   - watch
 - apiGroups:
   - ""
+  resources:
+  - pods/eviction
+  verbs:
+  - create
+- apiGroups:
+  - ""
   - events.k8s.io
   resources:
   - events
   verbs:
   - create
   - patch
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  verbs:
+  - get
 - apiGroups:
   - burst.homelab.dev
   resources:
