@@ -52,7 +52,7 @@ type ReaperReconciler struct {
 }
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create
 // +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch

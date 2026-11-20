@@ -19,8 +19,8 @@ rules:
   - ""
   resources:
   - pods
+  - secrets
   verbs:
-  - delete
   - get
   - list
   - watch
@@ -30,14 +30,6 @@ rules:
   - pods/eviction
   verbs:
   - create
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - ""
   - events.k8s.io
