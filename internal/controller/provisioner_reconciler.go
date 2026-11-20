@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,7 +112,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	logger.Info("matched unschedulable pod to pool", "pod", req.NamespacedName, "pool", pool.Name)
 
 	// Skip if we already processed this pod (prevents double-provisioning from race conditions)
-	if pod.Annotations != nil && pod.Annotations["burst.homelab.dev/provisioned"] == labelValueTrue {
+	if pod.Annotations[annotationProvisioned] == labelValueTrue {
 		return ctrl.Result{}, nil
 	}
 
@@ -179,10 +180,11 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Launch nodes with fallback on capacity errors.
+	launched := 0
 	for range nodesNeeded {
 		nodeName := fmt.Sprintf("burst-%s-%s", pool.Name, randomSuffix())
 
-		userData, err := talos.PatchAndEncode(configData, nodeName)
+		userData, err := talos.PatchAndEncode(configData, nodeName, talosTaints(pool.Spec.NodeTaints))
 		if err != nil {
 			// Checked before RunInstances: an oversized config would only
 			// come back from EC2 as InvalidParameterValue.
@@ -212,6 +214,14 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			LaunchedAt:   metav1.Now(),
 		})
 		pool.Status.PendingNodes++
+		launched++
+	}
+
+	// Nothing launched (capacity, a bad config, an API error): leave the pod
+	// unmarked so it's tried again, after a backoff that grows with each
+	// failure. Marking it here would leave it Pending for good.
+	if launched == 0 {
+		return r.retryLater(ctx, &pod, pool.Name), nil
 	}
 
 	// Persist status update
@@ -219,16 +229,68 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("updating pool status: %w", err)
 	}
 
-	// Annotate pod to prevent double-provisioning on re-reconcile
+	r.markProvisioned(ctx, &pod)
+	return ctrl.Result{}, nil
+}
+
+// retryLater counts a round of launches that produced no node on the pod
+// and returns when to try it again.
+func (r *ProvisionerReconciler) retryLater(ctx context.Context, pod *corev1.Pod, poolName string) ctrl.Result {
+	logger := log.FromContext(ctx)
+	failures := launchFailures(pod) + 1
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
-	pod.Annotations["burst.homelab.dev/provisioned"] = labelValueTrue
-	if err := r.Update(ctx, &pod); err != nil {
-		logger.Error(err, "failed to annotate pod as provisioned", "pod", req.NamespacedName)
+	pod.Annotations[annotationLaunchFailures] = strconv.Itoa(failures)
+	if err := r.Update(ctx, pod); err != nil {
+		logger.Error(err, "failed to record launch failure on pod", "pod", client.ObjectKeyFromObject(pod))
 	}
+	backoff := launchRetryBackoff(failures)
+	logger.Info("no burst node launched, will retry", "pool", poolName, "pod", client.ObjectKeyFromObject(pod),
+		"failures", failures, "retryAfter", backoff)
+	return ctrl.Result{RequeueAfter: backoff}
+}
 
-	return ctrl.Result{}, nil
+// markProvisioned annotates the pod so a re-reconcile doesn't launch
+// another node for it.
+func (r *ProvisionerReconciler) markProvisioned(ctx context.Context, pod *corev1.Pod) {
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+	pod.Annotations[annotationProvisioned] = labelValueTrue
+	delete(pod.Annotations, annotationLaunchFailures)
+	if err := r.Update(ctx, pod); err != nil {
+		log.FromContext(ctx).Error(err, "failed to annotate pod as provisioned", "pod", client.ObjectKeyFromObject(pod))
+	}
+}
+
+const (
+	annotationProvisioned = "burst.homelab.dev/provisioned"
+	// annotationLaunchFailures counts launches for a pod that produced no
+	// node, for the retry backoff.
+	annotationLaunchFailures = "burst.homelab.dev/launch-failures"
+
+	launchRetryBase = 30 * time.Second
+	launchRetryMax  = 10 * time.Minute
+)
+
+// launchFailures is how many launches for pod have failed so far.
+func launchFailures(pod *corev1.Pod) int {
+	n, err := strconv.Atoi(pod.Annotations[annotationLaunchFailures])
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// launchRetryBackoff is the wait before trying again after the given
+// number of failed launches: 30s, doubling, at most 10m.
+func launchRetryBackoff(failures int) time.Duration {
+	d := launchRetryBase
+	for i := 1; i < failures && d < launchRetryMax; i++ {
+		d *= 2
+	}
+	return min(d, launchRetryMax)
 }
 
 // launchWithFallback tries each candidate instance type in order.
@@ -358,8 +420,11 @@ func (r *NodeReadyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 					node.Labels = make(map[string]string)
 				}
 				maps.Copy(node.Labels, pool.Spec.NodeLabels)
+				// The Talos config already registers the node with the
+				// pool's taints; this covers a config that dropped them.
+				node.Spec.Taints = withTaints(node.Spec.Taints, pool.Spec.NodeTaints)
 				if err := r.Update(ctx, &node); err != nil {
-					logger.Error(err, "failed to update node labels", "node", node.Name)
+					logger.Error(err, "failed to update node labels and taints", "node", node.Name)
 				}
 
 				if err := r.Status().Update(ctx, pool); err != nil {
@@ -443,4 +508,35 @@ func randomSuffix() string {
 func MapNodeToPodReconcile(ctx context.Context, obj client.Object) []reconcile.Request {
 	// Not used directly - nodes are watched by NodeReadyReconciler
 	return nil
+}
+
+// talosTaints is a pool's node taints in machine.nodeTaints form.
+func talosTaints(taints []burstv1alpha1.NodeTaint) map[string]string {
+	if len(taints) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(taints))
+	for _, t := range taints {
+		out[t.Key] = talos.TaintValue(t.Value, t.Effect)
+	}
+	return out
+}
+
+// withTaints adds each pool taint the node doesn't already carry, by key
+// and effect.
+func withTaints(existing []corev1.Taint, taints []burstv1alpha1.NodeTaint) []corev1.Taint {
+	for _, t := range taints {
+		want := corev1.Taint{Key: t.Key, Value: t.Value, Effect: corev1.TaintEffect(t.Effect)}
+		found := false
+		for _, have := range existing {
+			if have.MatchTaint(&want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			existing = append(existing, want)
+		}
+	}
+	return existing
 }
