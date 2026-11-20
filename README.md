@@ -50,6 +50,8 @@ kubectl -n cloud-burst-system create secret generic talos-worker-config \
   --from-file=worker.yaml=/path/to/your/worker.yaml
 ```
 
+The controller can read Secrets only in its own namespace (`cloud-burst-system`), so create each BurstNodePool and its Talos config Secret there.
+
 ### 3. Install CRDs and deploy
 
 ```sh
