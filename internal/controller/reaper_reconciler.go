@@ -53,6 +53,8 @@ type ReaperReconciler struct {
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create
+// +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=burst.homelab.dev,resources=burstnodepools,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=burst.homelab.dev,resources=burstnodepools/status,verbs=get;update;patch
