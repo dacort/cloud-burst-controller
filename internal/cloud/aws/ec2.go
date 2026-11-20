@@ -88,6 +88,12 @@ func (p *EC2Provider) TerminateNode(ctx context.Context, instanceID string) erro
 		InstanceIds: []string{instanceID},
 	})
 	if err != nil {
+		// An instance terminated long enough ago drops out of EC2's API;
+		// it's gone either way, so a repeated teardown can finish.
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "InvalidInstanceID.NotFound" {
+			return nil
+		}
 		return fmt.Errorf("terminating EC2 instance %s: %w", instanceID, err)
 	}
 	return nil
