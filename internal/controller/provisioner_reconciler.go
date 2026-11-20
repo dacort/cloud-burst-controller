@@ -60,11 +60,23 @@ type ProvisionerReconciler struct {
 	// launch a node for it (an oversized Talos config, say), where
 	// `kubectl describe pod` shows it; otherwise that's only in the logs.
 	Recorder events.EventRecorder
+	// SecretReader reads pools' Talos config secrets. The manager's API
+	// reader goes straight to the API server, so the controller needs only
+	// get on secrets in its own namespace; the cached client would list and
+	// watch every Secret in the cluster. Defaults to Client.
+	SecretReader client.Reader
+}
+
+func (r *ProvisionerReconciler) secretReader() client.Reader {
+	if r.SecretReader != nil {
+		return r.SecretReader
+	}
+	return r.Client
 }
 
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",namespace=cloud-burst-system,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=burst.homelab.dev,resources=burstnodepools,verbs=get;list;watch;update;patch
@@ -167,7 +179,7 @@ func (r *ProvisionerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		Namespace: pool.Namespace,
 		Name:      pool.Spec.Talos.MachineConfigSecret,
 	}
-	if err := r.Get(ctx, secretKey, &secret); err != nil {
+	if err := r.secretReader().Get(ctx, secretKey, &secret); err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting Talos config secret %s: %w", secretKey, err)
 	}
 	configKey := pool.Spec.Talos.MachineConfigKey
