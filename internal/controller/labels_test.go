@@ -158,7 +158,7 @@ func TestOrphanDetectionMatchesInstancesToNodesByName(t *testing.T) {
 
 	var nodes corev1.NodeList
 	require.NoError(t, c.List(context.Background(), &nodes))
-	var names []string
+	names := make([]string, 0, len(nodes.Items))
 	for _, n := range nodes.Items {
 		names = append(names, n.Name)
 	}
