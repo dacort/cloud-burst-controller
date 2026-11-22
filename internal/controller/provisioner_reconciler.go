@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -420,29 +421,28 @@ func (r *NodeReadyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 
 			if nodeStatus.State == burstv1alpha1.NodeStatePending && isNodeReady(&node) {
+				// Label and taint the node before calling it running: a node
+				// counted as running without its labels gets no pods, and
+				// orphan detection can't tell it from someone else's.
+				if err := r.labelNode(ctx, &node, pool); err != nil {
+					return ctrl.Result{}, err
+				}
 				logger.Info("burst node became ready", "node", node.Name, "pool", pool.Name)
 				now := metav1.Now()
 				nodeStatus.State = burstv1alpha1.NodeStateRunning
 				nodeStatus.ReadyAt = &now
 				pool.Status.PendingNodes--
 				pool.Status.ActiveNodes++
-
-				// Apply node labels from pool spec
-				if node.Labels == nil {
-					node.Labels = make(map[string]string)
-				}
-				maps.Copy(node.Labels, pool.Spec.NodeLabels)
-				// The Talos config already registers the node with the
-				// pool's taints; this covers a config that dropped them.
-				node.Spec.Taints = withTaints(node.Spec.Taints, pool.Spec.NodeTaints)
-				if err := r.Update(ctx, &node); err != nil {
-					logger.Error(err, "failed to update node labels and taints", "node", node.Name)
-				}
-
 				if err := r.Status().Update(ctx, pool); err != nil {
 					return ctrl.Result{}, fmt.Errorf("updating pool status: %w", err)
 				}
 				return ctrl.Result{}, nil
+			}
+
+			// A running node that lost its labels or taints, or never got
+			// them, gets them back.
+			if nodeStatus.State == burstv1alpha1.NodeStateRunning {
+				return ctrl.Result{}, r.labelNode(ctx, &node, pool)
 			}
 
 			// Check boot timeout
@@ -475,6 +475,38 @@ func (r *NodeReadyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// labelNode gives node the pool's labels and taints, plus the managed
+// label, if it lacks any of them. It patches rather than updates, so a
+// kubelet heartbeat landing between read and write doesn't make it fail,
+// and only adds: labels and taints others set are left alone.
+func (r *NodeReadyReconciler) labelNode(
+	ctx context.Context, node *corev1.Node, pool *burstv1alpha1.BurstNodePool,
+) error {
+	want := map[string]string{"burst.homelab.dev/managed": labelValueTrue}
+	maps.Copy(want, pool.Spec.NodeLabels)
+	taints := withTaints(slices.Clone(node.Spec.Taints), pool.Spec.NodeTaints)
+	missing := len(taints) != len(node.Spec.Taints)
+	for k, v := range want {
+		if node.Labels[k] != v {
+			missing = true
+		}
+	}
+	if !missing {
+		return nil
+	}
+	base := node.DeepCopy()
+	if node.Labels == nil {
+		node.Labels = make(map[string]string, len(want))
+	}
+	maps.Copy(node.Labels, want)
+	node.Spec.Taints = taints
+	if err := r.Patch(ctx, node, client.StrategicMergeFrom(base)); err != nil {
+		return fmt.Errorf("labelling node %s: %w", node.Name, err)
+	}
+	log.FromContext(ctx).Info("labelled burst node", "node", node.Name, "pool", pool.Name)
+	return nil
 }
 
 func (r *NodeReadyReconciler) SetupWithManager(mgr ctrl.Manager) error {

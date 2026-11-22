@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -59,14 +60,14 @@ func (r *OrphanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, fmt.Errorf("listing managed cloud nodes: %w", err)
 	}
 
-	// Get all K8s nodes with burst label
+	// Match instances to Nodes by name, whatever their labels: a burst Node
+	// whose labelling failed is still the instance's Node, and terminating
+	// it would kill a healthy node.
 	var nodeList corev1.NodeList
-	if err := r.List(ctx, &nodeList, client.MatchingLabels{"burst.homelab.dev/managed": labelValueTrue}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("listing burst K8s nodes: %w", err)
+	if err := r.List(ctx, &nodeList); err != nil {
+		return ctrl.Result{}, fmt.Errorf("listing K8s nodes: %w", err)
 	}
-
-	// Build lookup maps
-	k8sNodeNames := make(map[string]bool)
+	k8sNodeNames := make(map[string]bool, len(nodeList.Items))
 	for _, node := range nodeList.Items {
 		k8sNodeNames[node.Name] = true
 	}
@@ -99,6 +100,9 @@ func (r *OrphanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Case 2: K8s node exists, no cloud instance → delete K8s node
 	for _, node := range nodeList.Items {
+		if !isBurstNode(&node) {
+			continue
+		}
 		if _, exists := cloudInstancesByName[node.Name]; exists {
 			continue // Has a matching cloud instance
 		}
@@ -111,6 +115,17 @@ func (r *OrphanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	return ctrl.Result{RequeueAfter: r.checkInterval()}, nil
+}
+
+// isBurstNode reports whether node is one this controller launched: it
+// carries the managed label, or it has a burst node's name and isn't Ready,
+// as a node left over from an instance that went before it was labelled
+// would. A Ready node without the label could be anyone's, so it's left be.
+func isBurstNode(node *corev1.Node) bool {
+	if node.Labels["burst.homelab.dev/managed"] == labelValueTrue {
+		return true
+	}
+	return strings.HasPrefix(node.Name, "burst-") && !isNodeReady(node)
 }
 
 func (r *OrphanReconciler) removeFromPoolStatus(ctx context.Context, nodeName string) {
